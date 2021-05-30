@@ -42,11 +42,6 @@ function parse_parameters() {
                     case ${LLVM_TARGET} in
                         "AArch64") TARGETS+=("aarch64-linux-gnu") ;;
                         "ARM") TARGETS+=("arm-linux-gnueabi") ;;
-                        "Mips") TARGETS+=("mipsel-linux-gnu") ;;
-                        "PowerPC") TARGETS+=("powerpc-linux-gnu" "powerpc64-linux-gnu" "powerpc64le-linux-gnu") ;;
-                        "RISCV") TARGETS+=("riscv64-linux-gnu") ;;
-                        "SystemZ") TARGETS+=("s390x-linux-gnu") ;;
-                        "X86") TARGETS+=("x86_64-linux-gnu") ;;
                     esac
                 done
                 ;;
@@ -59,13 +54,6 @@ function set_default_values() {
     [[ -z ${TARGETS[*]} || ${TARGETS[*]} = "all" ]] && TARGETS=(
         "arm-linux-gnueabi"
         "aarch64-linux-gnu"
-        "mipsel-linux-gnu"
-        "powerpc-linux-gnu"
-        "powerpc64-linux-gnu"
-        "powerpc64le-linux-gnu"
-        "riscv64-linux-gnu"
-        "s390x-linux-gnu"
-        "x86_64-linux-gnu"
     )
     [[ -z ${CONFIG_TARGET} ]] && CONFIG_TARGET=defconfig
 }
@@ -113,12 +101,8 @@ function check_binutils() {
     # Check for all binutils and build them if necessary
     BINUTILS_TARGETS=()
     for PREFIX in "${TARGETS[@]}"; do
-        # We assume an x86_64 host, should probably make this more generic in the future
-        if [[ ${PREFIX} = "x86_64-linux-gnu" ]]; then
-            COMMAND=as
-        else
-            COMMAND="${PREFIX}"-as
-        fi
+        # We assume these scripts will be only used to make arm64/arm tc-builds
+        COMMAND="${PREFIX}"-as
         command -v "${COMMAND}" &>/dev/null || BINUTILS_TARGETS+=("${PREFIX}")
     done
     [[ -n "${BINUTILS_TARGETS[*]}" ]] && { "${TC_BLD}"/build-binutils.py -t "${BINUTILS_TARGETS[@]}" || exit ${?}; }
@@ -128,13 +112,6 @@ function print_tc_info() {
     # Print final toolchain information
     header "Toolchain information"
     clang --version
-    for PREFIX in "${TARGETS[@]}"; do
-        echo
-        case ${PREFIX} in
-            x86_64-linux-gnu) as --version ;;
-            *) "${PREFIX}"-as --version ;;
-        esac
-    done
 }
 
 function build_kernels() {
@@ -144,11 +121,6 @@ function build_kernels() {
     case "$(uname -m)" in
         arm*) [[ ${TARGETS[*]} =~ arm ]] || NEED_GCC=true ;;
         aarch64) [[ ${TARGETS[*]} =~ aarch64 ]] || NEED_GCC=true ;;
-        mips*) [[ ${TARGETS[*]} =~ mips ]] || NEED_GCC=true ;;
-        ppc*) [[ ${TARGETS[*]} =~ powerpc ]] || NEED_GCC=true ;;
-        s390*) [[ ${TARGETS[*]} =~ s390 ]] || NEED_GCC=true ;;
-        riscv*) [[ ${TARGETS[*]} =~ riscv ]] || NEED_GCC=true ;;
-        i*86 | x86*) [[ ${TARGETS[*]} =~ x86_64 ]] || NEED_GCC=true ;;
     esac
     ${NEED_GCC:=false} && MAKE+=(HOSTCC=gcc HOSTCXX=g++)
 
@@ -177,63 +149,6 @@ function build_kernels() {
                     CROSS_COMPILE="${TARGET}-" \
                     KCONFIG_ALLCONFIG=<(echo CONFIG_CPU_BIG_ENDIAN=n) \
                     distclean "${CONFIG_TARGET}" Image.gz modules || exit ${?}
-                ;;
-            "mipsel-linux-gnu")
-                time \
-                    "${MAKE[@]}" \
-                    ARCH=mips \
-                    CROSS_COMPILE="${TARGET}-" \
-                    distclean malta_defconfig vmlinux modules || exit ${?}
-                ;;
-            "powerpc-linux-gnu")
-                time \
-                    "${MAKE[@]}" \
-                    ARCH=powerpc \
-                    CROSS_COMPILE="${TARGET}-" \
-                    distclean ppc44x_defconfig zImage modules || exit ${?}
-                ;;
-            "powerpc64-linux-gnu")
-                time \
-                    "${MAKE[@]}" \
-                    ARCH=powerpc \
-                    LD="${TARGET}-ld" \
-                    CROSS_COMPILE="${TARGET}-" \
-                    distclean pseries_defconfig disable-werror.config vmlinux modules || exit ${?}
-                ;;
-            "powerpc64le-linux-gnu")
-                time \
-                    "${MAKE[@]}" \
-                    ARCH=powerpc \
-                    CROSS_COMPILE="${TARGET}-" \
-                    distclean powernv_defconfig zImage.epapr modules || exit ${?}
-                ;;
-            "riscv64-linux-gnu")
-                RISCV_MAKE=(
-                    "${MAKE[@]}"
-                    ARCH=riscv
-                    CROSS_COMPILE="${TARGET}-"
-                    LD="${TARGET}-ld"
-                    LLVM_IAS=1
-                )
-                time "${RISCV_MAKE[@]}" distclean defconfig || exit ${?}
-                # https://github.com/ClangBuiltLinux/linux/issues/1143
-                grep -q "config EFI" arch/riscv/Kconfig && scripts/config --file out/.config -d EFI
-                time "${RISCV_MAKE[@]}" Image.gz modules || exit ${?}
-                ;;
-            "s390x-linux-gnu")
-                time \
-                    "${MAKE[@]}" \
-                    ARCH=s390 \
-                    CROSS_COMPILE="${TARGET}-" \
-                    LD="${TARGET}-ld" \
-                    OBJCOPY="${TARGET}-objcopy" \
-                    OBJDUMP="${TARGET}-objdump" \
-                    distclean defconfig bzImage modules || exit ${?}
-                ;;
-            "x86_64-linux-gnu")
-                time \
-                    "${MAKE[@]}" \
-                    distclean "${CONFIG_TARGET}" bzImage modules || exit ${?}
                 ;;
         esac
     done
